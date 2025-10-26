@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SelfSync Focus Dashboard (Vibrant UI)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for aesthetic enhancements */
+        body { 
+            font-family: 'Poppins', sans-serif; 
+            min-height: 100vh;
+            display: flex;
+            align-items: flex-start;
+        }
+        /* Soft UI/Glassmorphism Base Shadow */
+        .soft-shadow {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+        }
+
+        .task-item {
+            transition: all 0.3s ease-in-out;
+        }
+        /* Completed Next Action task */
+        .completed-task {
+            opacity: 0.5;
+            text-decoration: line-through;
+            background-color: #e5e7eb; /* Gray 200 */
+        }
+        /* Style for completed routine items (Daily Routine tab) */
+        .routine-item.completed {
+            opacity: 0.6;
+            background-color: #e5e7eb; 
+            border-left-color: #93c5fd; /* Light blue accent */
+        }
+        .tab-button.active {
+            border-color: #6d28d9; /* NEW: Dark Purple */
+            color: #6d28d9;
+            background-color: #f3e8ff; /* Light Lilac */
+        }
+        /* Priority Colors (Updated to fit the new vibrant theme structure) */
+        .priority-p1 { border-left: 4px solid #ef4444; } /* Red 500 */
+        .priority-p2 { border-left: 4px solid #f59e0b; } /* Amber 500 */
+        .priority-p3 { border-left: 4px solid #10b981; } /* Emerald 500 */
+
+        /* Enhanced Button Animation (Micro-Interactions) */
+        button:not([disabled]) {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+        }
+        button:not([disabled]):hover {
+            box-shadow: 0 8px 15px -3px rgba(109, 40, 217, 0.3); /* Purple hover glow */
+            transform: translateY(-2px);
+        }
+        button:not([disabled]):active {
+            transform: translateY(1px) scale(0.98);
+            box-shadow: 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        .unpin-btn:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        // VIBRANT PURPLE THEME: Lilac, Turquoise, Malachite
+                        'primary': '#6d28d9', // NEW: Violet 700 (Main CTA/Interaction)
+                        'accent': '#06b6d4',  // NEW: Cyan 600 (Focus/Secondary CTA/Highlight)
+                        'light-bg': '#f5f3ff', // NEW: Violet 50 (Soft background)
+                        'card-bg': '#ffffff',  // Pure White (Card surface)
+                        'dark-text': '#1e293b', // Slate 800 
+                    },
+                    fontFamily: {
+                        sans: ['Poppins', 'sans-serif'], 
+                    },
+                }
+            }
+        }
+    </script>
+    <script>
+        // --- Data Storage and Global Variables (Functionality remains the same) ---
+        const NEXT_ACTIONS_KEY = "selfsync_actions";
+        const SCHEDULES_KEY = "selfsync_schedules";
+        const DAILY_STATUS_KEY = "selfsync_daily_status_map";
+        const SKILLS_KEY = "selfsync_skills";
+        const LOGS_KEY = "selfsync_skill_logs_entries"; 
+        const FOCUS_ACTION_KEY = "selfsync_focus_action"; 
+        const STREAK_HISTORY_KEY = "selfsync_streak_history"; 
+
+        let allSchedules = [];
+        let dailyStatus = {};
+        let allSkills = [];
+        let skillLogEntries = [];
+        let nextActions = [];
+        let focusActionId = null; 
+        let streakHistory = {};
+
+        let currentActionFilter = 'all'; 
+        let lastReminderTime = null;
+
+        const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+        // --- Helper Functions ---
+
+        const generateUniqueId = () => Date.now().toString(36) + Math.random().toString(36).substring(2);
+
+        const getCurrentDayName = () => DAY_NAMES[new Date().getDay()];
+
+        const getTodayDateString = () => {
+            const d = new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        const formatDate = (timestamp) => {
+            if (!timestamp) return 'N/A';
+            const date = new Date(timestamp);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        
+        const formatMinutesToHours = (totalMinutes) => {
+            if (totalMinutes === undefined || totalMinutes === 0) return "0m";
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            let parts = [];
+            if (hours > 0) {
+                parts.push(`${hours}h`);
+            }
+            if (minutes > 0 || hours === 0) {
+                parts.push(`${minutes}m`);
+            }
+            return parts.join(' ');
+        };
+        
+        const aggregateSkillLogs = (logs) => {
+            const totals = {};
+            logs.forEach(log => {
+                totals[log.skillId] = (totals[log.skillId] || 0) + log.minutes;
+            });
+            return totals;
+        };
+
+        const getPriorityColorClass = (priority) => {
+            switch (priority) {
+                case 'P1': return 'priority-p1';
+                case 'P2': return 'priority-p2';
+                case 'P3': return 'priority-p3';
+                default: return '';
+            }
+        };
+        
+        // --- Streak Calculation ---
+        const calculateStreak = (history) => {
+            const dates = Object.keys(history).sort().reverse();
+            let currentStreak = 0;
+            let lastDate = null;
+            const today = getTodayDateString();
+
+            for (const date of dates) {
+                const completion = history[date];
+                
+                if (date > today) continue;
+                
+                if (completion === 100) {
+                    if (!lastDate) {
+                        currentStreak = 1;
+                    } else {
+                        const currentDateObj = new Date(date);
+                        const lastDateObj = new Date(lastDate);
+                        
+                        const diffTime = Math.abs(lastDateObj.getTime() - currentDateObj.getTime());
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        
+                        if (diffDays === 1) {
+                            currentStreak++;
+                        } else {
+                            if (date === today) {
+                                currentStreak = 1; 
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    lastDate = date;
+                } else {
+                    break;
+                }
+            }
+            return currentStreak;
+        };
+
+
+        // --- Local Storage & Initialization ---
+
+        const loadData = (key, defaultValue) => {
+            try {
+                const data = localStorage.getItem(key);
+                return data ? JSON.parse(data) : defaultValue;
+            } catch (e) {
+                console.error("Error loading data from local storage:", e);
+                return defaultValue;
+            }
+        };
+
+        const saveData = (key, data) => {
+            try {
+                localStorage.setItem(key, JSON.stringify(data));
+                return true;
+            } catch (e) {
+                console.error("Error saving data to local storage:", e);
+                return false;
+            }
+        };
+        
+        const updateDailyStatusAndHistory = () => {
+            const today = getCurrentDayName();
+            const todaySchedules = allSchedules.filter(item => item.day === today);
+            const completedCount = Object.keys(dailyStatus).filter(id => dailyStatus[id]).length;
+            const totalCount = todaySchedules.length;
+            const completionPercent = totalCount > 0 ? Math.floor((completedCount / totalCount) * 100) : 0;
+            
+            saveData(DAILY_STATUS_KEY, { date: getTodayDateString(), status: dailyStatus });
+            
+            streakHistory[getTodayDateString()] = completionPercent;
+            saveData(STREAK_HISTORY_KEY, streakHistory);
+
+            return completionPercent;
+        }
+
+        const initializeData = () => {
+            nextActions = loadData(NEXT_ACTIONS_KEY, []);
+            allSchedules = loadData(SCHEDULES_KEY, []);
+            allSkills = loadData(SKILLS_KEY, []);
+            skillLogEntries = loadData(LOGS_KEY, []);
+            focusActionId = loadData(FOCUS_ACTION_KEY, null);
+            streakHistory = loadData(STREAK_HISTORY_KEY, {});
+
+            const todayDate = getTodayDateString();
+            const fullDailyStatus = loadData(DAILY_STATUS_KEY, { date: todayDate, status: {} });
+            
+            if (fullDailyStatus.date === todayDate) {
+                dailyStatus = fullDailyStatus.status;
+            } else {
+                dailyStatus = {};
+            }
+            
+            checkAndSyncSchedules();
+            
+            if (focusActionId && !nextActions.some(t => t.id === focusActionId && !t.completed)) {
+                 focusActionId = null;
+                 saveData(FOCUS_ACTION_KEY, null);
+            }
+            
+            setupReminderCheck();
+        };
+        
+        // --- Recurrence and Cleanup Logic ---
+        const checkAndSyncSchedules = () => {
+            const currentDay = getCurrentDayName();
+            let hasNewTasks = false;
+            
+            const schedulesLengthBeforeCleanup = allSchedules.length;
+            allSchedules = allSchedules.filter(item => {
+                const isTemplate = Array.isArray(item.day) || !item.isRecurring;
+                const isCurrentInstance = item.type === 'instance' && item.day === currentDay;
+                return isTemplate || !item.type || isCurrentInstance;
+            });
+            if (allSchedules.length !== schedulesLengthBeforeCleanup) {
+                hasNewTasks = true;
+            }
+            
+            const templates = allSchedules.filter(item => Array.isArray(item.day));
+
+            templates.forEach(item => {
+                const recurrenceDays = item.day;
+                
+                if (recurrenceDays.includes(currentDay)) {
+                    const existingInstance = allSchedules.find(a => 
+                        a.parentId === item.id && 
+                        a.day === currentDay && 
+                        a.type === 'instance'
+                    );
+                    
+                    if (!existingInstance) {
+                        const newInstance = {
+                            id: generateUniqueId(),
+                            parentId: item.id, 
+                            type: 'instance',
+                            day: currentDay, 
+                            time: item.time,
+                            activity: item.activity,
+                            createdAt: Date.now(),
+                            isRecurring: true,
+                        };
+                        allSchedules.push(newInstance);
+                        hasNewTasks = true;
+                    }
+                }
+            });
+            
+            if (hasNewTasks) {
+                saveData(SCHEDULES_KEY, allSchedules);
+            }
+        };
+
+        // --- Time-Based Reminder Logic ---
+        const checkNextReminder = () => {
+            if (!("Notification" in window) || Notification.permission !== "granted") {
+                return; 
+            }
+
+            const now = new Date();
+            const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+            const currentDay = getCurrentDayName();
+
+            const todaySchedules = allSchedules
+                .filter(item => item.day === currentDay && !dailyStatus[item.id]) 
+                .sort((a, b) => (a.time < b.time) ? -1 : 1);
+            
+            const nextItem = todaySchedules.find(item => item.time >= currentTimeStr);
+            
+            if (nextItem && nextItem.time === currentTimeStr) {
+                if (lastReminderTime !== currentTimeStr) {
+                    new Notification("SelfSync: Time to Focus!", {
+                        body: `🔔 Scheduled activity: ${nextItem.activity}`,
+                        icon: 'https://placehold.co/48x48/6d28d9/ffffff?text=🔔'
+                    });
+                    lastReminderTime = currentTimeStr;
+                }
+            }
+        }
+        
+        const setupReminderCheck = () => {
+            if ("Notification" in window && Notification.permission !== "granted" && Notification.permission !== "denied") {
+                 Notification.requestPermission();
+            }
+            
+            setInterval(checkNextReminder, 60000); 
+        }
+
+        // --- UI Rendering and Tab Management ---
+
+        const refreshUI = (activeTabId) => {
+            const completionPercent = updateDailyStatusAndHistory();
+            renderDailyFocus(focusActionId, nextActions, completionPercent);
+            renderNextActions(nextActions, currentActionFilter, focusActionId);
+
+            if (activeTabId === 'daily-routine-view') {
+                renderDailyRoutine(allSchedules);
+            } else if (activeTabId === 'schedule-view') {
+                renderWeeklySchedule(allSchedules);
+            } else if (activeTabId === 'skill-tracker-view') {
+                renderSkillTracker(allSkills, skillLogEntries);
+            }
+        };
+        
+        // --- DAILY FOCUS BANNER RENDER ---
+
+        const renderDailyFocus = (focusId, tasks, completionPercent) => {
+            const focusBanner = document.getElementById('daily-focus-banner');
+            const focusTask = tasks.find(t => t.id === focusId);
+            const currentStreak = calculateStreak(streakHistory);
+            
+            let motivatingMessage = "";
+            if (completionPercent === 100) {
+                 motivatingMessage = "Routine complete! Excellent consistency. ✅";
+            } else if (completionPercent >= 90) {
+                 motivatingMessage = "Fantastic Day! Nearly hit the mark. Keep it up. 🚀";
+            } else if (completionPercent >= 50) {
+                 motivatingMessage = "Solid effort today! Focus on the remaining blocks. 💪";
+            } else {
+                 motivatingMessage = "Starting strong! Still plenty of time to catch up. ⏳";
+            }
+
+            // Updated color scheme for the banner text
+            const completionStatus = `
+                <div class="text-xs text-right mt-1 sm:mt-0 text-white/90">
+                    <span class="font-bold text-lg">${currentStreak}</span> Day Streak 🔥
+                    | <span class="font-semibold">${completionPercent}%</span> Today
+                </div>
+            `;
+            
+            const dayScoreBanner = `
+                <div class="text-xs font-semibold mt-2 text-center sm:text-left">
+                    ${motivatingMessage}
+                </div>
+            `;
+
+
+            if (focusTask) {
+                focusBanner.classList.remove('bg-gray-200', 'text-gray-600', 'bg-light-bg', 'text-dark-text');
+                focusBanner.classList.add('bg-primary', 'text-white', 'shadow-2xl'); // Use primary for pinned focus
+                focusBanner.innerHTML = `
+                    <div class="sm:flex sm:justify-between sm:items-center">
+                        <div>
+                             <p class="text-xs font-semibold uppercase mb-1 text-purple-300">🎯 Pinned Focus Action:</p>
+                             <span class="text-xl font-bold truncate">${focusTask.description}</span>
+                        </div>
+                        <button data-id="${focusTask.id}" class="unpin-btn text-white/80 hover:text-white p-2 rounded-full transition ml-4 hidden sm:block" title="Unpin Task">
+                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                        </button>
+                    </div>
+                    ${completionStatus}
+                    ${dayScoreBanner}
+                `;
+            } else {
+                focusBanner.classList.remove('bg-primary', 'text-white', 'shadow-2xl');
+                focusBanner.classList.add('bg-light-bg', 'text-dark-text', 'soft-shadow');
+                focusBanner.innerHTML = `
+                    <div class="sm:flex sm:justify-between sm:items-center">
+                        <p class="font-medium text-dark-text">No Focus Action Pinned. Set your priority!</p>
+                        <p class="text-dark-text">${completionStatus}</p>
+                    </div>
+                    <div class="text-xs font-semibold mt-2 text-center sm:text-left text-dark-text">
+                        ${motivatingMessage}
+                    </div>
+                `;
+            }
+
+            document.querySelector('.unpin-btn')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                pinTask(e.currentTarget.dataset.id, true);
+            });
+        };
+
+
+        // --- NEXT ACTIONS (TODO LIST) LOGIC & RENDER ---
+        
+        const pinTask = (taskId, isPinned) => {
+            focusActionId = isPinned ? null : taskId;
+            saveData(FOCUS_ACTION_KEY, focusActionId);
+            refreshUI(document.querySelector('.tab-content:not(.hidden)').id);
+        };
+
+        const addTask = (taskText, projectTag, priority) => {
+            const newTask = {
+                id: generateUniqueId(),
+                description: taskText,
+                project: projectTag || null,
+                priority: priority || 'P3',
+                completed: false,
+                createdAt: Date.now(),
+            };
+            nextActions.push(newTask);
+            saveData(NEXT_ACTIONS_KEY, nextActions);
+            renderNextActions(nextActions, currentActionFilter, focusActionId);
+        };
+
+        const toggleTaskCompletion = (taskId, isCompleted) => {
+            const task = nextActions.find(t => t.id === taskId);
+            if (task) {
+                task.completed = !isCompleted;
+                saveData(NEXT_ACTIONS_KEY, nextActions);
+                
+                if (task.id === focusActionId && task.completed) {
+                    pinTask(task.id, true);
+                } else {
+                    refreshUI(document.querySelector('.tab-content:not(.hidden)').id);
+                }
+            }
+        };
+
+        const deleteTask = (taskId) => {
+            if (!confirm("Are you sure you want to delete this action?")) return;
+            nextActions = nextActions.filter(t => t.id !== taskId);
+            saveData(NEXT_ACTIONS_KEY, nextActions);
+            
+            if (taskId === focusActionId) {
+                pinTask(taskId, true);
+            } else {
+                 refreshUI(document.querySelector('.tab-content:not(.hidden)').id);
+            }
+        };
+
+        const renderNextActions = (tasks, filter, focusId) => {
+            const taskListElement = document.getElementById('task-list');
+            taskListElement.innerHTML = '';
+            
+            let filteredTasks = tasks;
+            if (filter !== 'all') {
+                filteredTasks = tasks.filter(t => t.project === filter);
+            }
+
+            const uniqueProjects = [...new Set(tasks.map(t => t.project).filter(p => p))];
+            const filterDropdown = document.getElementById('project-filter');
+            const currentFilter = filterDropdown.value; 
+            filterDropdown.innerHTML = `<option value="all">All Projects</option>`;
+            uniqueProjects.sort().forEach(project => {
+                filterDropdown.innerHTML += `<option value="${project}" ${project === currentFilter ? 'selected' : ''}>${project}</option>`;
+            });
+
+
+            // Sort: 1. Pinned 2. P1, P2, P3 3. Incomplete 4. Creation Time
+            filteredTasks.sort((a, b) => {
+                const priorityOrder = { 'P1': 1, 'P2': 2, 'P3': 3, null: 4 };
+
+                if (a.id === focusId && b.id !== focusId) return -1;
+                if (a.id !== focusId && b.id === focusId) return 1;
+                
+                if (a.completed && !b.completed) return 1;
+                if (!a.completed && b.completed) return -1;
+                
+                if (!a.completed && !b.completed) {
+                    const pA = priorityOrder[a.priority];
+                    const pB = priorityOrder[b.priority];
+                    if (pA !== pB) return pA - pB;
+                }
+                
+                return a.createdAt - b.createdAt;
+            });
+
+            if (filteredTasks.length === 0) {
+                taskListElement.innerHTML = `<p class="text-center text-gray-500 py-6">No actions found${filter === 'all' ? '.' : ` for project: ${filter}.`}</p>`;
+                return;
+            }
+
+            filteredTasks.forEach(task => {
+                const isCompleted = task.completed;
+                const isPinned = task.id === focusId;
+                const priorityClass = !isCompleted ? getPriorityColorClass(task.priority) : '';
+                
+                const taskElement = document.createElement('div');
+                taskElement.className = `task-item flex items-center justify-between p-4 mb-2 rounded-xl border border-gray-200 ${isCompleted ? 'completed-task' : 'bg-card-bg soft-shadow hover:soft-shadow-lg'} ${isPinned ? 'ring-2 ring-accent border-accent/50' : ''} ${priorityClass}`;
+                
+                taskElement.innerHTML = `
+                    <div class="flex items-center flex-1 min-w-0">
+                        <button data-id="${task.id}" data-completed="${isCompleted}" class="toggle-btn w-6 h-6 rounded-full border-2 transition-colors duration-200 mr-4 ${isCompleted ? 'bg-primary border-primary' : 'border-gray-400 hover:bg-gray-100'}" title="${isCompleted ? 'Mark Incomplete' : 'Mark Complete'}">
+                            ${isCompleted ? '<svg class="w-4 h-4 text-white mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}
+                        </button>
+                        <span class="text-lg truncate ${isCompleted ? 'text-gray-500' : 'text-dark-text'}">
+                            ${task.description}
+                            ${task.project ? `<span class="ml-2 px-2 py-0.5 text-xs font-semibold rounded-full ${isPinned ? 'bg-accent/20 text-accent' : 'bg-primary/10 text-primary'}">${task.project}</span>` : ''}
+                            ${!isCompleted && task.priority ? `<span class="ml-2 px-2 py-0.5 text-xs font-bold rounded-full ${task.priority === 'P1' ? 'bg-red-500 text-white' : task.priority === 'P2' ? 'bg-amber-500 text-white' : 'bg-green-500 text-white'}">${task.priority}</span>` : ''}
+                        </span>
+                    </div>
+                    
+                    <div class="flex items-center space-x-2 ml-4">
+                        <button data-id="${task.id}" data-pinned="${isPinned}" class="pin-btn text-gray-400 ${isPinned ? 'text-accent' : 'hover:text-yellow-600'} p-2 rounded-full transition" title="${isPinned ? 'Unpin as Focus Action' : 'Pin as Focus Action'}" ${isCompleted ? 'disabled' : ''}>
+                            ${isPinned 
+                                ? '<svg class="w-5 h-5 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M14 4a1 1 0 00-1-1H6a1 1 0 00-1 1v5.667l-2 1.333V20a1 1 0 001 1h12a1 1 0 001-1v-9l-2-1.333V4z"/></svg>' 
+                                : '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.414 11.586a2 2 0 10-2.828-2.828 2 2 0 002.828 2.828z"/></svg>'}
+                        </button>
+                        <button data-id="${task.id}" class="delete-btn text-gray-400 hover:text-accent p-2 rounded-full transition" title="Delete Task">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                `;
+                taskListElement.appendChild(taskElement);
+            });
+
+            document.querySelectorAll('.toggle-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    toggleTaskCompletion(e.currentTarget.dataset.id, e.currentTarget.dataset.completed === 'true');
+                });
+            });
+
+            document.querySelectorAll('.delete-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    deleteTask(e.currentTarget.dataset.id);
+                });
+            });
+            
+            document.querySelectorAll('.pin-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    if (e.currentTarget.closest('.task-item').classList.contains('completed-task')) return;
+                    pinTask(e.currentTarget.dataset.id, e.currentTarget.dataset.pinned === 'true');
+                });
+            });
+        };
+
+        // --- TIME TABLE (SCHEDULE) & DAILY ROUTINE LOGIC & RENDER ---
+        
+        const addScheduleItem = (day, time, activity, recurrenceDays = null) => {
+            const isRecurring = Array.isArray(recurrenceDays) && recurrenceDays.length > 0;
+            
+            const newItem = {
+                id: generateUniqueId(),
+                day: isRecurring ? recurrenceDays : day, 
+                time,
+                activity,
+                createdAt: Date.now(),
+                isRecurring: isRecurring,
+            };
+            allSchedules.push(newItem);
+            saveData(SCHEDULES_KEY, allSchedules);
+            checkAndSyncSchedules();
+            refreshUI(document.querySelector('.tab-content:not(.hidden)').id);
+        };
+
+        const deleteScheduleItem = (itemId) => {
+            if (!confirm("Are you sure you want to delete this schedule item?")) return;
+            allSchedules = allSchedules.filter(item => item.id !== itemId);
+            
+            const template = allSchedules.find(item => item.id === itemId && item.isRecurring);
+            if (template) {
+                allSchedules = allSchedules.filter(item => item.parentId !== itemId);
+            }
+            
+            delete dailyStatus[itemId]; 
+            saveData(SCHEDULES_KEY, allSchedules);
+            saveData(DAILY_STATUS_KEY, { date: getTodayDateString(), status: dailyStatus });
+            refreshUI(document.querySelector('.tab-content:not(.hidden)').id);
+        };
+
+        const toggleDailyCompletion = (scheduleId, isCompleted) => {
+            if (!isCompleted) {
+                dailyStatus[scheduleId] = true;
+            } else {
+                delete dailyStatus[scheduleId];
+            }
+            refreshUI('daily-routine-view');
+        };
+
+        const renderWeeklySchedule = (schedules) => {
+            const scheduleListElement = document.getElementById('weekly-schedule-list');
+            scheduleListElement.innerHTML = '';
+            
+            const templateSchedules = schedules.filter(item => item.type !== 'instance');
+
+            templateSchedules.sort((a, b) => {
+                if (a.isRecurring && b.isRecurring) {
+                    if (a.day.length !== b.day.length) return a.day.length - b.day.length;
+                }
+                
+                const dayA = Array.isArray(a.day) ? a.day[0] : a.day;
+                const dayB = Array.isArray(b.day) ? b.day[0] : b.day;
+                
+                const dayIndexA = DAY_ORDER.indexOf(dayA);
+                const dayIndexB = DAY_ORDER.indexOf(dayB);
+
+                if (dayIndexA !== dayIndexB) return dayIndexA - dayIndexB;
+                if (a.time < b.time) return -1;
+                if (a.time > b.time) return 1;
+                return 0;
+            });
+
+            if (templateSchedules.length === 0) {
+                scheduleListElement.innerHTML = `<p class="text-center text-gray-500 py-6">Your time table is empty. Use the form above to plan your week! 🗓️</p>`;
+                return;
+            }
+
+            let currentDay = '';
+            scheduleListElement.innerHTML += `<div class="grid grid-cols-12 text-sm font-semibold text-gray-500 border-b border-gray-300 pb-2 mb-3 px-4"><span class="col-span-2">Day/Recurrence</span><span class="col-span-2">Time</span><span class="col-span-6">Activity</span><span class="col-span-2 text-right">Delete</span></div>`;
+
+            templateSchedules.forEach(item => {
+                const isRecurring = item.isRecurring;
+                const displayDay = isRecurring ? item.day.map(d => d.substring(0, 3)).join(', ') : item.day;
+                
+                if (item.day !== currentDay && !isRecurring) {
+                    currentDay = item.day;
+                    const dayAnchor = document.createElement('div');
+                    dayAnchor.id = `day-anchor-${currentDay}`;
+                    dayAnchor.className = "pt-2";
+                    scheduleListElement.appendChild(dayAnchor);
+                }
+
+                const itemElement = document.createElement('div');
+                itemElement.className = "flex items-center justify-between p-3 bg-card-bg border border-gray-200 rounded-xl soft-shadow hover:soft-shadow-lg transition duration-200 mb-2";
+                
+                itemElement.innerHTML = `
+                    <div class="grid grid-cols-12 items-center min-w-0 flex-1">
+                        <div class="col-span-12 sm:col-span-2 flex items-center">
+                             <span class="sm:hidden font-semibold text-accent mr-2">Day:</span>
+                            <span class="text-sm font-medium ${isRecurring ? 'text-primary font-bold' : 'text-accent'}">${displayDay}</span>
+                        </div>
+                        <div class="col-span-6 sm:col-span-2 flex items-center">
+                            <span class="sm:hidden font-semibold text-primary mr-2">Time:</span>
+                            <span class="font-mono text-lg text-primary">${item.time}</span>
+                        </div>
+                        <div class="col-span-6 sm:col-span-6 flex items-center min-w-0">
+                            <span class="sm:hidden font-semibold text-gray-500 mr-2">Activity:</span>
+                            <span class="text-lg text-dark-text truncate">${item.activity}</span>
+                        </div>
+                    </div>
+                    <button data-id="${item.id}" class="delete-schedule-btn text-gray-400 hover:text-accent p-2 rounded-full transition ml-2 col-span-2 text-right">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                `;
+                scheduleListElement.appendChild(itemElement);
+            });
+
+            document.querySelectorAll('.delete-schedule-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    deleteScheduleItem(e.currentTarget.dataset.id);
+                });
+            });
+        };
+        
+        const renderDailyRoutine = (schedules) => {
+            const dailyRoutineListElement = document.getElementById('daily-routine-list');
+            dailyRoutineListElement.innerHTML = '';
+            
+            const today = getCurrentDayName();
+            
+            const todaySchedules = schedules
+                .filter(item => item.day === today || (item.type === 'instance' && item.day === today))
+                .sort((a, b) => (a.time < b.time) ? -1 : (a.time > b.time) ? 1 : 0);
+
+            document.getElementById('today-day-display').textContent = today;
+            
+            if (todaySchedules.length === 0) {
+                dailyRoutineListElement.innerHTML = `<p class="text-center text-gray-500 py-6">You have no items scheduled for ${today}. Use the form above or the Time Table tab to plan your day! 📅</p>`;
+                return;
+            }
+            
+            todaySchedules.forEach(item => {
+                const isCompleted = dailyStatus[item.id] || false;
+                const itemElement = document.createElement('div');
+                const isRecurringInstance = item.type === 'instance';
+
+                itemElement.className = `routine-item flex items-center justify-between p-4 rounded-xl soft-shadow hover:soft-shadow-lg transition duration-200 border-l-4 border-accent mb-3 ${isCompleted ? 'completed' : 'bg-card-bg border border-gray-200'}`;
+                
+                itemElement.innerHTML = `
+                    <div class="grid grid-cols-12 items-center min-w-0 flex-1">
+                        <div class="col-span-2 sm:col-span-1 flex items-center mb-1 sm:mb-0">
+                            <button data-id="${item.id}" data-completed="${isCompleted}" class="toggle-daily-btn w-6 h-6 rounded-full border-2 transition-colors duration-200 mr-3 ${isCompleted ? 'bg-primary border-primary' : 'border-gray-400 hover:bg-gray-100'}">
+                                ${isCompleted ? '<svg class="w-4 h-4 text-white mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}
+                            </button>
+                        </div>
+                        <div class="col-span-10 sm:col-span-2 flex items-center mb-1 sm:mb-0">
+                            <span class="sm:hidden font-semibold text-primary mr-2">Time:</span>
+                            <span class="font-mono text-xl text-primary font-semibold ${isCompleted ? 'text-gray-500' : 'text-primary'}">${item.time}</span>
+                        </div>
+                        <div class="col-span-10 sm:col-span-8 flex items-center min-w-0 mt-2 sm:mt-0">
+                            <span class="sm:hidden font-semibold text-gray-500 mr-2">Activity:</span>
+                            <span class="text-lg truncate ${isCompleted ? 'text-gray-500' : 'text-dark-text'}">${item.activity}</span>
+                            ${isRecurringInstance ? `<span class="ml-2 px-2 py-0.5 text-xs font-semibold rounded-full bg-primary/10 text-primary">Recurring</span>` : ''}
+                        </div>
+                    </div>
+                    <button data-id="${item.id}" class="delete-schedule-btn text-gray-400 hover:text-accent p-2 rounded-full transition ml-2" title="${isRecurringInstance ? 'Delete Template' : 'Delete Item'}">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                `;
+                dailyRoutineListElement.appendChild(itemElement);
+            });
+            
+            document.querySelectorAll('.delete-schedule-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    deleteScheduleItem(e.currentTarget.dataset.id);
+                });
+            });
+            
+            document.querySelectorAll('.toggle-daily-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    toggleDailyCompletion(e.currentTarget.dataset.id, e.currentTarget.dataset.completed === 'true');
+                });
+            });
+        };
+
+        // --- SKILL TRACKER LOGIC & RENDER ---
+
+        const addSkill = (name, targetHours) => {
+            const newSkill = {
+                id: generateUniqueId(),
+                name: name,
+                targetHours: parseInt(targetHours),
+                createdAt: Date.now(),
+            };
+            allSkills.push(newSkill);
+            saveData(SKILLS_KEY, allSkills);
+            renderSkillTracker(allSkills, skillLogEntries);
+        };
+
+        const deleteSkill = (skillId) => {
+            if (!confirm("Are you sure you want to delete this skill and ALL its log history?")) return;
+            allSkills = allSkills.filter(s => s.id !== skillId);
+            skillLogEntries = skillLogEntries.filter(log => log.skillId !== skillId);
+            saveData(SKILLS_KEY, allSkills);
+            saveData(LOGS_KEY, skillLogEntries);
+            renderSkillTracker(allSkills, skillLogEntries);
+        };
+
+        const logTime = (skillId, minutes) => {
+            const parsedMinutes = parseInt(minutes);
+            const newLog = {
+                id: generateUniqueId(),
+                skillId: skillId,
+                minutes: parsedMinutes,
+                timestamp: Date.now(),
+            };
+            skillLogEntries.push(newLog);
+            saveData(LOGS_KEY, skillLogEntries);
+            renderSkillTracker(allSkills, skillLogEntries);
+        };
+        
+        const deleteLogEntry = (logId) => {
+            if (!confirm("Delete this individual log entry?")) return;
+            skillLogEntries = skillLogEntries.filter(log => log.id !== logId);
+            saveData(LOGS_KEY, skillLogEntries);
+            renderSkillTracker(allSkills, skillLogEntries);
+        }
+
+        const renderSkillTracker = (skills, logs) => {
+            const listEl = document.getElementById('skill-list');
+            const logFormSkillSelect = document.getElementById('log-skill-id');
+            listEl.innerHTML = '';
+            logFormSkillSelect.innerHTML = '<option value="">-- Select Skill --</option>';
+            
+            const aggregatedLogs = aggregateSkillLogs(logs);
+
+            const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+            const weeklyMinutes = logs.filter(log => log.timestamp > oneWeekAgo).reduce((sum, log) => sum + log.minutes, 0);
+            document.getElementById('skill-weekly-summary').textContent = `Total Logged This Week: ${formatMinutesToHours(weeklyMinutes)}`;
+
+
+            if (skills.length === 0) {
+                listEl.innerHTML = `<p class="text-center text-gray-500 py-6">No skills tracked yet. Define your first skill goal above! 🎯</p>`;
+                return;
+            }
+
+            skills.forEach(skill => {
+                const option = document.createElement('option');
+                option.value = skill.id;
+                option.textContent = skill.name;
+                logFormSkillSelect.appendChild(option);
+
+                const totalMinutes = aggregatedLogs[skill.id] || 0;
+                const totalHours = totalMinutes / 60;
+                const targetHours = skill.targetHours || 0;
+                const progressPercentage = targetHours > 0 ? Math.min(100, (totalHours / targetHours) * 100) : 0;
+                const isCompleted = progressPercentage >= 100;
+                
+                const recentLogs = logs
+                    .filter(log => log.skillId === skill.id)
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 5);
+
+                const logListHtml = recentLogs.map(log => `
+                    <div class="flex justify-between items-center text-xs text-gray-500 hover:bg-gray-100 p-1 rounded-sm transition">
+                        <span>+${log.minutes}m</span>
+                        <span class="flex items-center">
+                            ${formatDate(log.timestamp)}
+                            <button data-id="${log.id}" class="delete-log-btn text-gray-400 hover:text-red-500 ml-2" title="Delete Log">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </span>
+                    </div>
+                `).join('');
+
+                const itemEl = document.createElement('div');
+                itemEl.className = `p-4 bg-card-bg border border-gray-200 rounded-xl soft-shadow mb-4 ${isCompleted ? 'border-primary ring-2 ring-primary shadow-lg' : ''}`;
+                
+                itemEl.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 class="text-xl font-bold ${isCompleted ? 'text-primary' : 'text-dark-text'}">${skill.name}</h4>
+                        <button data-id="${skill.id}" class="delete-skill-btn text-gray-400 hover:text-accent p-1 rounded-full transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    
+                    <p class="text-sm text-gray-500 mb-4">Goal: ${targetHours} Hours</p>
+                    
+                    ${isCompleted ? `
+                        <div class="p-3 bg-primary/10 text-primary font-bold rounded-lg mb-4 text-center">
+                            🎉 Goal Achieved! Total ${formatMinutesToHours(totalMinutes)} invested!
+                        </div>
+                    ` : ''}
+
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="col-span-3 sm:col-span-2">
+                            <div class="relative pt-1">
+                                <div class="flex mb-2 items-center justify-between">
+                                    <div>
+                                        <span class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full ${isCompleted ? 'text-white bg-primary' : 'text-dark-text bg-primary/20'}">
+                                            ${isCompleted ? 'Completed' : `${Math.floor(progressPercentage)}% Progress`}
+                                        </span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-xs font-semibold inline-block text-dark-text">
+                                            ${formatMinutesToHours(totalMinutes)} / ${targetHours}h
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-200">
+                                    <div style="width: ${progressPercentage}%" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-primary transition-all duration-500"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-span-3 sm:col-span-1 border-t sm:border-t-0 sm:border-l pl-4 pt-4 sm:pt-0">
+                            <h5 class="text-sm font-semibold text-dark-text mb-2">Recent Logs:</h5>
+                            <div class="space-y-1">
+                                ${recentLogs.length > 0 ? logListHtml : '<p class="text-xs text-gray-400">No logs yet.</p>'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                listEl.appendChild(itemEl);
+            });
+            
+            document.querySelectorAll('.delete-skill-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    deleteSkill(e.currentTarget.dataset.id);
+                });
+            });
+            
+            document.querySelectorAll('.delete-log-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    deleteLogEntry(e.currentTarget.dataset.id);
+                });
+            });
+        };
+        
+        // --- DATA MANAGEMENT FUNCTIONS ---
+
+        const resetAllData = () => {
+            if (confirm("🚨 WARNING: Are you absolutely sure you want to reset ALL your SelfSync data? This action cannot be undone.")) {
+                localStorage.clear();
+                alert("Data cleared successfully. Refreshing page.");
+                window.location.reload();
+            }
+        };
+
+        const exportData = () => {
+            const data = {
+                nextActions: loadData(NEXT_ACTIONS_KEY, []),
+                allSchedules: loadData(SCHEDULES_KEY, []),
+                dailyStatus: loadData(DAILY_STATUS_KEY, {}),
+                allSkills: loadData(SKILLS_KEY, []),
+                skillLogEntries: loadData(LOGS_KEY, []),
+                focusActionId: loadData(FOCUS_ACTION_KEY, null),
+                streakHistory: loadData(STREAK_HISTORY_KEY, {}),
+            };
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `SelfSync_backup_${getTodayDateString()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            alert("Data exported successfully! Check your downloads folder.");
+        };
+
+        // --- Core Tab Switching Logic ---
+        const switchTab = (targetId) => {
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active', 'text-primary', 'border-primary', 'bg-f1f5f9');
+                btn.classList.add('text-gray-500', 'border-transparent', 'hover:text-primary', 'hover:border-primary/50');
+            });
+            document.querySelector(`[data-target="${targetId}"]`).classList.add('active', 'text-primary', 'border-primary');
+            document.querySelector(`[data-target="${targetId}"]`).classList.remove('text-gray-500', 'border-transparent', 'hover:text-primary', 'hover:border-primary/50');
+
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            document.getElementById(targetId).classList.remove('hidden');
+
+            refreshUI(targetId);
+        };
+        
+        // --- Quick Jump Logic ---
+        const jumpToDay = (dayName) => {
+            const targetElement = document.getElementById(`day-anchor-${dayName}`);
+            if (targetElement) {
+                const offset = 100; 
+                const elementPosition = targetElement.getBoundingClientRect().top;
+                const offsetPosition = elementPosition + window.pageYOffset - offset;
+
+                window.scrollTo({
+                    top: offsetPosition,
+                    behavior: "smooth"
+                });
+            }
+        };
+
+        // --- Event Listeners and Initial Load ---
+        window.onload = () => {
+            initializeData();
+            
+            document.getElementById('user-id-display').textContent = `Storage Method: Local Storage API (Data saved in your browser)`;
+
+            // Next Actions Form Listener
+            document.getElementById('new-task-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const taskInput = document.getElementById('new-task-input');
+                const projectInput = document.getElementById('new-task-project');
+                const priorityInput = document.getElementById('new-task-priority');
+                
+                const taskText = taskInput.value.trim();
+                const projectTag = projectInput.value.trim() || null;
+                const priority = priorityInput.value;
+
+                if (taskText) {
+                    addTask(taskText, projectTag, priority);
+                    taskInput.value = '';
+                    priorityInput.value = 'P3';
+                }
+            });
+            
+            // Project Filter Change Listener
+            document.getElementById('project-filter').addEventListener('change', (e) => {
+                currentActionFilter = e.target.value;
+                renderNextActions(nextActions, currentActionFilter, focusActionId);
+            });
+
+            // Schedule Form Listener (for Time Table Tab)
+            document.getElementById('new-schedule-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const activity = document.getElementById('schedule-activity').value.trim();
+                const time = document.getElementById('schedule-time').value;
+                
+                const recurrenceSelect = document.getElementById('schedule-recurrence');
+                const singleDaySelect = document.getElementById('schedule-day');
+                
+                let selectedDays = [];
+                const recurrenceType = recurrenceSelect.value;
+                
+                if (recurrenceType === 'single') {
+                    selectedDays = singleDaySelect.value;
+                } else if (recurrenceType === 'custom') {
+                    document.querySelectorAll('.recurrence-day-checkbox:checked').forEach(cb => {
+                        selectedDays.push(cb.value);
+                    });
+                }
+
+                if (activity && time && (selectedDays.length > 0 || typeof selectedDays === 'string')) {
+                    if (recurrenceType === 'custom') {
+                        addScheduleItem(null, time, activity, selectedDays);
+                    } else {
+                        addScheduleItem(selectedDays, time, activity);
+                    }
+                    
+                    document.getElementById('schedule-activity').value = '';
+                    document.getElementById('schedule-time').value = '09:00'; 
+                } else if (recurrenceType === 'custom' && selectedDays.length === 0) {
+                     alert("Please select at least one day for weekly recurrence.");
+                } else {
+                     console.error("Missing schedule fields.");
+                }
+            });
+
+            // Recurrence/Day Toggle Logic for Time Table Form
+            document.getElementById('schedule-recurrence').addEventListener('change', (e) => {
+                const type = e.target.value;
+                document.getElementById('single-day-picker').classList.toggle('hidden', type !== 'single');
+                document.getElementById('custom-recurrence-picker').classList.toggle('hidden', type !== 'custom');
+            });
+            
+            // Daily Routine Add Form Listener
+            document.getElementById('daily-routine-add-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const activityInput = document.getElementById('daily-activity-input');
+                const timeInput = document.getElementById('daily-time-input');
+                const activity = activityInput.value.trim();
+                const time = timeInput.value;
+                const day = getCurrentDayName(); 
+
+                if (activity && time) {
+                    addScheduleItem(day, time, activity);
+                    activityInput.value = '';
+                    timeInput.value = '09:00'; 
+                }
+            });
+
+            // Skill Tracker Form Listener: Add Skill
+            document.getElementById('new-skill-goal-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const name = document.getElementById('skill-name-input').value.trim();
+                const targetHours = document.getElementById('skill-target-hours').value.trim();
+                if (name && targetHours > 0) {
+                    addSkill(name, targetHours);
+                    document.getElementById('skill-name-input').value = '';
+                    document.getElementById('skill-target-hours').value = '';
+                }
+            });
+            
+            // Skill Tracker Form Listener: Log Time
+            document.getElementById('log-time-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const skillId = document.getElementById('log-skill-id').value;
+                const minutes = document.getElementById('log-minutes').value;
+                if (skillId && minutes > 0) {
+                    logTime(skillId, minutes);
+                    document.getElementById('log-minutes').value = '';
+                } else if (minutes <= 0) {
+                     console.error("Please enter a positive number of minutes to log.");
+                } else if (!skillId) {
+                     console.error("Please select a skill to log time for.");
+                }
+            });
+            
+            // Tab Switching Logic
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    switchTab(e.target.dataset.target);
+                });
+            });
+            
+            // Day Jump Button Listeners (for Time Table)
+            document.querySelectorAll('.day-jump-btn').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const dayName = e.target.dataset.day;
+                    switchTab('schedule-view'); 
+                    setTimeout(() => jumpToDay(dayName), 10);
+                });
+            });
+
+            // Data Management Listeners
+            document.getElementById('reset-data-btn').addEventListener('click', resetAllData);
+            document.getElementById('export-data-btn').addEventListener('click', exportData);
+
+            // Set Initial Active Tab
+            switchTab('daily-routine-view');
+        };
+    </script>
+</head>
+<body class="bg-light-bg text-dark-text min-h-screen p-4 sm:p-8">
+
+    <div class="max-w-4xl mx-auto w-full">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold text-dark-text">Self<span class="text-accent">Sync</span> Focus</h1>
+            <p class="text-gray-500 mt-2">Manage your daily execution and long-term planning.</p>
+            <p id="user-id-display" class="text-xs text-primary mt-3 truncate"></p>
+        </header>
+
+        <div id="daily-focus-banner" class="p-4 rounded-xl mb-6 soft-shadow transition-all duration-300 bg-gray-200 text-gray-600">
+            <p class="font-medium">Loading Focus Action...</p>
+        </div>
+        
+        <div class="flex border-b-2 border-gray-300 mb-6 bg-card-bg rounded-t-xl overflow-hidden soft-shadow">
+            <button id="tab-daily" data-target="daily-routine-view" 
+                class="tab-button flex-1 py-3 text-lg font-semibold border-b-2 transition duration-300 border-transparent text-gray-500 hover:text-primary hover:border-primary/50">
+                Daily Routine
+            </button>
+            <button id="tab-actions" data-target="actions-view" 
+                class="tab-button flex-1 py-3 text-lg font-semibold border-b-2 transition duration-300 border-transparent text-gray-500 hover:text-primary hover:border-primary/50">
+                Next Actions
+            </button>
+            <button id="tab-schedule" data-target="schedule-view" 
+                class="tab-button flex-1 py-3 text-lg font-semibold border-b-2 transition duration-300 border-transparent text-gray-500 hover:text-primary hover:border-primary/50">
+                Time Table
+            </button>
+            <button id="tab-skills" data-target="skill-tracker-view" 
+                class="tab-button flex-1 py-3 text-lg font-semibold border-b-2 transition duration-300 border-transparent text-gray-500 hover:text-primary hover:border-primary/50">
+                Skill Tracker
+            </button>
+        </div>
+        
+        <div id="daily-routine-view" class="tab-content hidden p-4 bg-card-bg rounded-xl soft-shadow border border-gray-200">
+             <h2 class="text-3xl font-bold text-dark-text mb-6">Today's Focus: <span id="today-day-display" class="text-accent"></span></h2>
+             
+             <div id="daily-routine-add-container" class="mb-8 p-5 bg-light-bg border border-gray-300 rounded-xl shadow-inner">
+                <h3 class="text-lg font-semibold mb-3 text-dark-text">Quick Add Today's Timed Activity</h3>
+                <form id="daily-routine-add-form" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                    
+                    <div class="col-span-1 sm:col-span-2">
+                        <label for="daily-activity-input" class="block text-sm font-medium text-gray-500 mb-1">Activity</label>
+                        <input type="text" id="daily-activity-input" placeholder="e.g., Team Sync Meeting"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-accent"
+                            required>
+                    </div>
+                    
+                    <div class="col-span-1 sm:col-span-1">
+                        <label for="daily-time-input" class="block text-sm font-medium text-gray-500 mb-1">Time</label>
+                        <input type="time" id="daily-time-input" value="09:00"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-accent"
+                            required>
+                    </div>
+
+                    <button type="submit"
+                        class="col-span-1 sm:col-span-1 bg-accent hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-lg">
+                        Add to Today
+                    </button>
+                </form>
+            </div>
+             
+             <div class="grid grid-cols-12 text-sm font-semibold text-gray-500 border-b border-gray-300 pb-2 mb-3 px-4 hidden sm:grid">
+                 <span class="col-span-1">Done</span>
+                 <span class="col-span-2">Time</span>
+                 <span class="col-span-8">Activity</span>
+                 <span class="col-span-1 text-right">Del</span>
+             </div>
+
+             <div id="daily-routine-list" class="space-y-3">
+                 <p class="text-center text-gray-500 py-6">Loading today's schedule...</p>
+             </div>
+        </div>
+
+
+        <div id="actions-view" class="tab-content hidden p-4 bg-card-bg rounded-xl soft-shadow border border-gray-200">
+            <div class="mb-8 p-6 bg-light-bg border border-gray-300 rounded-xl shadow-inner">
+                 <h3 class="text-xl font-semibold mb-4 text-dark-text">Add New Action</h3>
+                <form id="new-task-form" class="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+                    
+                    <div class="col-span-1 sm:col-span-2">
+                         <label for="new-task-input" class="block text-sm font-medium text-gray-500 mb-1">Action</label>
+                         <input type="text" id="new-task-input" placeholder="What is the next action you need to take?"
+                             class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary transition duration-200"
+                             required>
+                    </div>
+                    <div class="col-span-1 sm:col-span-1">
+                         <label for="new-task-project" class="block text-sm font-medium text-gray-500 mb-1">Project/Tag</label>
+                         <input type="text" id="new-task-project" placeholder="e.g., Python, Work"
+                             class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary transition duration-200">
+                    </div>
+                     <div class="col-span-1 sm:col-span-1">
+                         <label for="new-task-priority" class="block text-sm font-medium text-gray-500 mb-1">Priority</label>
+                         <select id="new-task-priority" class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-2 focus:ring-primary transition duration-200">
+                             <option value="P3">P3 (Low)</option>
+                             <option value="P2">P2 (Medium)</option>
+                             <option value="P1">P1 (High)</option>
+                         </select>
+                    </div>
+                    <button type="submit"
+                        class="col-span-1 sm:col-span-1 bg-primary text-white font-bold py-3 px-8 rounded-lg">
+                        Add Action
+                    </button>
+                </form>
+            </div>
+    
+            <div class="mb-6 flex justify-between items-center">
+                 <h4 class="text-lg font-semibold text-dark-text">Action List</h4>
+                 <select id="project-filter" class="p-2 border border-gray-300 rounded-lg text-sm text-dark-text focus:outline-none focus:ring-1 focus:ring-primary">
+                     <option value="all">All Projects</option>
+                 </select>
+            </div>
+            
+            <main class="space-y-3" id="task-list">
+                <p class="text-center text-gray-500 py-6">Loading actions...</p>
+            </main>
+        </div>
+
+        <div id="schedule-view" class="tab-content hidden p-4 bg-card-bg rounded-xl soft-shadow border border-gray-200">
+            
+            <div id="schedule-form-container" class="mb-8 p-6 bg-light-bg border border-gray-300 rounded-xl shadow-inner">
+                <h3 class="text-xl font-semibold mb-4 text-dark-text">Add Schedule Item (Weekly Template)</h3>
+                <form id="new-schedule-form" class="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+                    
+                    <div class="col-span-1 sm:col-span-5 sm:col-span-2">
+                        <label for="schedule-activity" class="block text-sm font-medium text-gray-500 mb-1">Activity</label>
+                        <input type="text" id="schedule-activity" placeholder="e.g., Deep Work on Project"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-accent"
+                            required>
+                    </div>
+                    
+                    <div class="col-span-1 sm:col-span-1">
+                        <label for="schedule-time" class="block text-sm font-medium text-gray-500 mb-1">Time</label>
+                        <input type="time" id="schedule-time" value="09:00"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-accent"
+                            required>
+                    </div>
+
+                    <div class="col-span-1 sm:col-span-1">
+                        <label for="schedule-recurrence" class="block text-sm font-medium text-gray-500 mb-1">Schedule Type</label>
+                        <select id="schedule-recurrence" class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-accent" required>
+                             <option value="single">Single Day</option>
+                             <option value="custom">Weekly Recurrence</option>
+                        </select>
+                    </div>
+                    
+                    <div id="single-day-picker" class="col-span-1 sm:col-span-1">
+                        <label for="schedule-day" class="block text-sm font-medium text-gray-500 mb-1">Select Day</label>
+                        <select id="schedule-day" class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-accent" required>
+                            <option value="Monday">Monday</option>
+                            <option value="Tuesday">Tuesday</option>
+                            <option value="Wednesday">Wednesday</option>
+                            <option value="Thursday">Thursday</option>
+                            <option value="Friday">Friday</option>
+                            <option value="Saturday">Saturday</option>
+                            <option value="Sunday">Sunday</option>
+                        </select>
+                    </div>
+                    
+                    <div id="custom-recurrence-picker" class="col-span-1 sm:col-span-2 hidden">
+                        <label class="block text-sm font-medium text-gray-500 mb-1">Select Days</label>
+                        <div class="flex flex-wrap gap-2">
+                             ${DAY_ORDER.map(day => `
+                                 <label class="inline-flex items-center">
+                                     <input type="checkbox" class="recurrence-day-checkbox form-checkbox h-4 w-4 text-primary rounded" value="${day}">
+                                     <span class="ml-1 text-sm text-dark-text">${day.substring(0, 3)}</span>
+                                 </label>
+                             `).join('')}
+                        </div>
+                    </div>
+                    
+                    <button type="submit"
+                        class="col-span-1 sm:col-span-1 bg-accent text-white font-bold py-3 px-4 rounded-lg">
+                        Schedule
+                    </button>
+                </form>
+            </div>
+            
+            <div class="sticky top-0 z-10 p-4 -mx-4 sm:mx-0 bg-light-bg/95 backdrop-blur-sm border-b border-gray-300 soft-shadow rounded-lg">
+                 <h3 class="text-lg font-bold mb-3 text-dark-text">Jump to Day:</h3>
+                 <div class="flex flex-wrap justify-center gap-2">
+                    <button data-day="Monday" class="day-jump-btn text-sm bg-card-bg text-gray-600 px-3 py-1 rounded-full transition duration-150 border border-gray-300 hover:bg-primary hover:text-white">Mon</button>
+                    <button data-day="Tuesday" class="day-jump-btn text-sm bg-card-bg text-gray-600 px-3 py-1 rounded-full transition duration-150 border border-gray-300 hover:bg-primary hover:text-white">Tue</button>
+                    <button data-day="Wednesday" class="day-jump-btn text-sm bg-card-bg text-gray-600 px-3 py-1 rounded-full transition duration-150 border border-gray-300 hover:bg-primary hover:text-white">Wed</button>
+                    <button data-day="Thursday" class="day-jump-btn text-sm bg-card-bg text-gray-600 px-3 py-1 rounded-full transition duration-150 border border-gray-300 hover:bg-primary hover:text-white">Thu</button>
+                    <button data-day="Friday" class="day-jump-btn text-sm bg-card-bg text-gray-600 px-3 py-1 rounded-full transition duration-150 border border-gray-300 hover:bg-primary hover:text-white">Fri</button>
+                    <button data-day="Saturday" class="day-jump-btn text-sm bg-card-bg text-gray-600 px-3 py-1 rounded-full transition duration-150 border border-gray-300 hover:bg-primary hover:text-white">Sat</button>
+                    <button data-day="Sunday" class="day-jump-btn text-sm bg-card-bg text-gray-600 px-3 py-1 rounded-full transition duration-150 border border-gray-300 hover:bg-primary hover:text-white">Sun</button>
+                 </div>
+            </div>
+
+            <div id="weekly-schedule-list" class="space-y-4 pt-4">
+                <p class="text-center text-gray-500 py-6">Loading weekly schedule...</p>
+            </div>
+        </div>
+        
+        <div id="skill-tracker-view" class="tab-content hidden p-4 bg-card-bg rounded-xl soft-shadow border border-gray-200">
+            <h2 class="text-3xl font-bold text-dark-text mb-6">Skill Tracker & Growth</h2>
+            <p id="skill-weekly-summary" class="text-lg font-semibold text-primary mb-6 text-center">Loading weekly totals...</p>
+
+            <div class="mb-8 p-6 bg-light-bg border border-gray-300 rounded-xl shadow-inner">
+                <h3 class="text-xl font-semibold mb-4 text-dark-text">Set New Skill Goal</h3>
+                <form id="new-skill-goal-form" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                    <div class="col-span-1 sm:col-span-2">
+                        <label for="skill-name-input" class="block text-sm font-medium text-gray-500 mb-1">Skill Name</label>
+                        <input type="text" id="skill-name-input" placeholder="e.g., Learn Python"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-primary"
+                            required>
+                    </div>
+                    <div class="col-span-1 sm:col-span-1">
+                        <label for="skill-target-hours" class="block text-sm font-medium text-gray-500 mb-1">Target Hours</label>
+                        <input type="number" id="skill-target-hours" placeholder="e.g., 100" min="1"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-primary"
+                            required>
+                    </div>
+                    <button type="submit"
+                        class="col-span-1 sm:col-span-1 bg-primary text-white font-bold py-3 px-4 rounded-lg">
+                        Add Goal
+                    </button>
+                </form>
+            </div>
+            
+            <div class="mb-8 p-6 bg-light-bg border border-gray-300 rounded-xl shadow-inner">
+                <h3 class="text-xl font-semibold mb-4 text-dark-text">Log Time Spent Today (in minutes)</h3>
+                <form id="log-time-form" class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                    <div class="col-span-1 sm:col-span-2">
+                        <label for="log-skill-id" class="block text-sm font-medium text-gray-500 mb-1">Skill</label>
+                        <select id="log-skill-id"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-accent"
+                            required>
+                            <option value="">-- Select Skill --</option>
+                        </select>
+                    </div>
+                    <div class="col-span-1 sm:col-span-1">
+                        <label for="log-minutes" class="block text-sm font-medium text-gray-500 mb-1">Minutes Studied (e.g., 60)</label>
+                        <input type="number" id="log-minutes" placeholder="e.g., 60" min="1"
+                            class="w-full p-3 bg-white border border-gray-300 rounded-lg text-dark-text focus:outline-none focus:ring-1 focus:ring-accent"
+                            required>
+                    </div>
+                    <button type="submit"
+                        class="col-span-1 sm:col-span-1 bg-accent text-white font-bold py-3 px-4 rounded-lg">
+                        Log Time
+                    </button>
+                </form>
+            </div>
+
+            <div id="skill-list" class="space-y-4 pt-2">
+                <p class="text-center text-gray-500 py-6">Loading skills...</p>
+            </div>
+        </div>
+        
+        <div class="mt-12 p-6 bg-card-bg rounded-xl soft-shadow border border-gray-200">
+            <h3 class="text-xl font-bold text-dark-text mb-4">Data Management & Privacy</h3>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <button id="export-data-btn" class="flex-1 bg-primary/10 hover:bg-primary/20 text-primary font-semibold py-3 px-4 rounded-lg border border-primary/50">
+                    Export All Data (JSON)
+                </button>
+                <button id="reset-data-btn" class="flex-1 bg-red-500 text-white font-semibold py-3 px-4 rounded-lg">
+                    Reset ALL Data ⚠️
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>

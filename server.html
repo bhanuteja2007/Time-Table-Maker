@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>My Node.js App</title>
+</head>
+<body>
+  <h1>Backend Response:</h1>
+  <div id="output"></div>
+
+  <script>
+    fetch('http://localhost:3000/')
+      .then(res => res.text())
+      .then(data => {
+        document.getElementById('output').textContent = data;
+      })
+      .catch(err => {
+        console.error('Error fetching data:', err);
+      });
+  </script>
+</body>
+</html>
